@@ -11,6 +11,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"syscall"
@@ -136,7 +137,7 @@ func fetchSession(n string) {
 		log.Fatal(err)
 	}
 
-	if n := indexInHtml("Sign", pres.Body); n < 0 {
+	if n := indexInHtmlTag("title", "Sign", pres.Body); n < 0 {
 		fmt.Println("! login failed")
 		removeUserInfo()
 	}
@@ -173,7 +174,7 @@ func fetchSession(n string) {
 
 }
 
-func indexInHtml(t string, r io.ReadCloser) int {
+func indexInHtmlTag(tag, ct string, r io.ReadCloser) int {
 	tk := html.NewTokenizer(r)
 
 	for {
@@ -183,28 +184,30 @@ func indexInHtml(t string, r io.ReadCloser) int {
 		}
 
 		tn, _ := tk.TagName()
-		if string(tn) == "title" {
+		if string(tn) == tag {
 			tk.Next()
 			fmt.Println(string(tk.Text()))
-			return strings.Index((string(tk.Text())), t)
+			return strings.Index((string(tk.Text())), ct)
 		}
 	}
 	return -1
 }
 
-func fetchTestcase(cn string) {
-	URL := "https://atcoder.jp/contests/" + cn + "/tasks/" + cn + "_d"
+func fetchTestcase(cn, diff string) ([]TestCase, error) {
+	URL := "https://atcoder.jp/contests/" + cn + "/tasks/" + cn + "_" + diff
 
 	fmt.Println(URL)
 	resp, err := client.Get(URL)
 	if err != nil {
 		log.Fatal(err)
+		return []TestCase{}, err
 	}
 	defer resp.Body.Close()
 
 	d, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatal(err)
+		return []TestCase{}, err
 	}
 
 	prp := regexp.MustCompile(`<section>\s*<h3>[入出]力例[\s\S]+?</h3>([\s\S]+?)</section>`)
@@ -222,10 +225,36 @@ func fetchTestcase(cn string) {
 		}
 	}
 
-	fmt.Println(ret)
+	return ret, nil
 }
-func doTestcase() {
 
+func uniteNewLineCode(s string) string {
+	r := strings.NewReplacer("\r\n", "\n", "\r", "\n", "\n", "\n")
+	return r.Replace(s)
+}
+func DoTestcase() {
+	cases, _ := fetchTestcase("abc118", "d")
+	for _, v := range cases {
+		cmd := exec.Command("go", "run", "../atcoder/abc/118/d-dp.go")
+
+		in, err := cmd.StdinPipe()
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer in.Close()
+		io.WriteString(in, v.Input)
+
+		out, err := cmd.Output()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		outs := uniteNewLineCode(string(out))
+		pout := uniteNewLineCode(v.Output)
+		fmt.Println("result", outs)
+		fmt.Println("predict", pout)
+		fmt.Println("compare", strings.Compare(outs, pout))
+	}
 }
 
 func postAnswer() {
@@ -234,7 +263,7 @@ func postAnswer() {
 
 func TrySolve() {
 	//tryLogin()
-	fetchTestcase("abc118")
+	//fetchTestcase("abc118")
 	//doTestcase()
 
 	//postAnswer()
