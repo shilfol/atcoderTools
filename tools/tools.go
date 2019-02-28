@@ -30,6 +30,12 @@ type TestCase struct {
 	Output string `json:"output"`
 }
 
+type TestResult struct {
+	Pass    bool
+	Output  string
+	Predict string
+}
+
 var client *http.Client
 
 func init() {
@@ -232,29 +238,75 @@ func uniteNewLineCode(s string) string {
 	r := strings.NewReplacer("\r\n", "\n", "\r", "\n", "\n", "\n")
 	return r.Replace(s)
 }
-func DoTestcase() {
-	cases, _ := fetchTestcase("abc118", "d")
-	for _, v := range cases {
-		cmd := exec.Command("go", "run", "../atcoder/abc/118/d-dp.go")
 
-		in, err := cmd.StdinPipe()
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer in.Close()
-		io.WriteString(in, v.Input)
-
-		out, err := cmd.Output()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		outs := uniteNewLineCode(string(out))
-		pout := uniteNewLineCode(v.Output)
-		fmt.Println("result", outs)
-		fmt.Println("predict", pout)
-		fmt.Println("compare", strings.Compare(outs, pout))
+func innerCases(c TestCase) TestResult {
+	cmd := exec.Command("go", "run", "../atcoder/abc/118/d-dp.go")
+	res := TestResult{}
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		log.Fatal(err)
+		return res
 	}
+	defer in.Close()
+	io.WriteString(in, c.Input)
+
+	out, err := cmd.Output()
+	if err != nil {
+		log.Fatal(err)
+		return res
+	}
+
+	res.Output = uniteNewLineCode(string(out))
+	res.Predict = uniteNewLineCode(c.Output)
+	res.Pass = (strings.Compare(res.Output, res.Predict) == 0)
+
+	return res
+}
+
+func tryTests(done <-chan interface{}, cases []TestCase) <-chan TestResult {
+	resStream := make(chan TestResult, len(cases))
+	go func() {
+		defer close(resStream)
+		for _, v := range cases {
+			go func(t TestCase) {
+				resStream <- innerCases(t)
+			}(v)
+		}
+		for {
+			select {
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	return resStream
+}
+
+func DoTestcase() bool {
+	cases, _ := fetchTestcase("abc118", "d")
+
+	isPassed := true
+
+	done := make(chan interface{})
+	results := tryTests(done, cases)
+	fmt.Println("*", len(cases), "cases trying...")
+	for i := 1; i <= len(cases); i++ {
+		r := <-results
+		if r.Pass {
+			fmt.Println("* test", i, "passed")
+		} else {
+			fmt.Println("! test", i, "rejected")
+			isPassed = false
+		}
+		fmt.Println("- output:")
+		fmt.Println(r.Output)
+		fmt.Println("- Predict:")
+		fmt.Println(r.Predict)
+	}
+	close(done)
+
+	return isPassed
 }
 
 func postAnswer() {
