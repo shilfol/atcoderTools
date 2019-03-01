@@ -37,6 +37,7 @@ type TestResult struct {
 }
 
 var client *http.Client
+var csrfToken string
 
 func init() {
 	jar, err := cookiejar.New(nil)
@@ -46,13 +47,17 @@ func init() {
 	client = &http.Client{
 		Jar: jar,
 	}
+	tryLogin()
 }
 
 func tryLogin() {
 	sfileName := ".session.json"
 
 	if _, fe := os.Stat(sfileName); os.IsNotExist(fe) {
-		fetchSession(sfileName)
+		if err := fetchSession(sfileName); err != nil {
+			log.Fatal(err)
+		}
+
 	}
 
 	_, err := os.Open(sfileName)
@@ -114,7 +119,7 @@ func removeUserInfo() {
 	fmt.Println("* delete:", infofile)
 }
 
-func fetchSession(n string) {
+func fetchSession(n string) error {
 
 	info := inputUserInfo()
 
@@ -123,6 +128,7 @@ func fetchSession(n string) {
 	resp, err := client.Get(URL)
 	if err != nil {
 		log.Fatal(err)
+		return err
 	}
 
 	ck := resp.Cookies()
@@ -131,7 +137,7 @@ func fetchSession(n string) {
 	combtoken, _ := url.QueryUnescape(spl[0][tidx:])
 	cidx := strings.Index(combtoken, ":")
 	cfin := strings.Index(combtoken, "=")
-	csrfToken := combtoken[cidx+1 : cfin+1]
+	csrfToken = combtoken[cidx+1 : cfin+1]
 
 	data := url.Values{}
 	data.Add("csrf_token", csrfToken)
@@ -141,43 +147,19 @@ func fetchSession(n string) {
 	pres, err := client.PostForm(URL, data)
 	if err != nil {
 		log.Fatal(err)
+		return err
 	}
 
-	if n := indexInHtmlTag("title", "Sign", pres.Body); n < 0 {
+	if n := indexInHtmlTag("title", "Sign", pres.Body); n >= 0 {
 		fmt.Println("! login failed")
 		removeUserInfo()
+		return fmt.Errorf("failed login")
 	}
 	fmt.Println("* login success")
 
 	defer resp.Body.Close()
 
-	/*
-		pdata := url.Values{}
-		pdata.Add("data.TaskScreenName", "abc118_d")
-		pdata.Add("data.LanguageId", "3013")
-		pdata.Add("csrf_token", csrfToken)
-
-		f, err := os.Open("./abc/118/d-dp.go")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer f.Close()
-		fv, _ := ioutil.ReadAll(f)
-
-		pdata.Add("sourceCode", string(fv))
-
-		SURL := "https://atcoder.jp/contests/abc118/submit"
-
-		sres, err := client.PostForm(SURL, pdata)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println(sres)
-		sv, _ := ioutil.ReadAll(sres.Body)
-		fmt.Println(string(sv))
-		defer sres.Body.Close()
-	*/
-
+	return nil
 }
 
 func indexInHtmlTag(tag, ct string, r io.ReadCloser) int {
@@ -239,8 +221,8 @@ func uniteNewLineCode(s string) string {
 	return r.Replace(s)
 }
 
-func innerCases(c TestCase) TestResult {
-	cmd := exec.Command("go", "run", "../atcoder/abc/118/d-dp.go")
+func innerCases(c TestCase, path string) TestResult {
+	cmd := exec.Command("go", "run", path)
 	res := TestResult{}
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -263,13 +245,13 @@ func innerCases(c TestCase) TestResult {
 	return res
 }
 
-func tryTests(done <-chan interface{}, cases []TestCase) <-chan TestResult {
+func tryTests(done <-chan interface{}, cases []TestCase, filePath string) <-chan TestResult {
 	resStream := make(chan TestResult, len(cases))
 	go func() {
 		defer close(resStream)
 		for _, v := range cases {
 			go func(t TestCase) {
-				resStream <- innerCases(t)
+				resStream <- innerCases(t, filePath)
 			}(v)
 		}
 		for {
@@ -283,13 +265,13 @@ func tryTests(done <-chan interface{}, cases []TestCase) <-chan TestResult {
 	return resStream
 }
 
-func DoTestcase() bool {
-	cases, _ := fetchTestcase("abc118", "d")
+func DoTestcase(contestName, difficulty, filePath string) bool {
+	cases, _ := fetchTestcase(contestName, difficulty)
 
 	isPassed := true
 
 	done := make(chan interface{})
-	results := tryTests(done, cases)
+	results := tryTests(done, cases, filePath)
 	fmt.Println("*", len(cases), "cases trying...")
 	for i := 1; i <= len(cases); i++ {
 		r := <-results
@@ -309,15 +291,48 @@ func DoTestcase() bool {
 	return isPassed
 }
 
-func postAnswer() {
+func PostAnswer(contestName, difficulty, filePath string) {
+	fmt.Println("* post Answer", contestName+"_"+difficulty)
 
+	pdata := url.Values{}
+	pdata.Add("data.TaskScreenName", contestName+"_"+difficulty)
+	pdata.Add("data.LanguageId", "3013")
+	pdata.Add("csrf_token", csrfToken)
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		fmt.Println("! file cannot open")
+		log.Fatal(err)
+	}
+	defer f.Close()
+	fv, _ := ioutil.ReadAll(f)
+
+	pdata.Add("sourceCode", string(fv))
+
+	URL := "https://atcoder.jp/contests/" + contestName + "/submit"
+
+	res, err := client.PostForm(URL, pdata)
+	if err != nil {
+		fmt.Println("! post answer failed")
+		log.Fatal(err)
+	}
+	defer res.Body.Close()
+
+	fmt.Println("* post answer success")
+	fmt.Println("  check submission page")
+	fmt.Println(" ", "https://atcoder.jp/contest/"+contestName+"/submissions/me")
 }
 
-func TrySolve() {
-	//tryLogin()
-	//fetchTestcase("abc118")
-	//doTestcase()
+func TrySolve(contestName, difficulty, filePath string) {
+	ispassed := DoTestcase(contestName, difficulty, filePath)
 
-	//postAnswer()
+	if !ispassed {
+		fmt.Println("! failed test case")
+		fmt.Println("  try again")
+		return
+	}
+	fmt.Println("* passed test case")
+
+	PostAnswer(contestName, difficulty, filePath)
 
 }
