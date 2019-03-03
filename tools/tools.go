@@ -183,7 +183,7 @@ func PostAnswer(contestName, difficulty, filePath string) {
 
 	fmt.Println("* post answer success")
 	fmt.Println("  check submission page")
-	fmt.Println(" ", "https://atcoder.jp/contest/"+contestName+"/submissions/me")
+	fmt.Println(" ", "https://atcoder.jp/contests/"+contestName+"/submissions/me")
 }
 
 func TrySolve(contestName, difficulty, filePath string) {

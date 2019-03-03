@@ -1,10 +1,12 @@
 package tools
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -21,7 +23,63 @@ type TestResult struct {
 	Predict string
 }
 
-func fetchTestcase(cn, diff string) ([]TestCase, error) {
+const cacheDir = "./.cacheTest/"
+
+func init() {
+	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
+		return
+	}
+
+	if err := os.Mkdir(cacheDir, 0700); err != nil {
+		fmt.Println("! failed making test cache directory")
+		log.Fatal(err)
+	}
+}
+
+func readCacheCase(cn, diff string) ([]TestCase, error) {
+	cp := cacheDir + cn + diff + ".json"
+
+	if _, err := os.Stat(cp); os.IsNotExist(err) {
+		fmt.Println("! testcase cache not exist")
+		return []TestCase{}, err
+	}
+
+	// cache exist as .cacheTest/"cn""d".json
+	// example .cache/abc100a.json
+	cb, err := ioutil.ReadFile(cp)
+	if err != nil {
+		fmt.Println("! read testcase cache failed")
+		log.Fatal(err)
+		return []TestCase{}, err
+	}
+
+	var ret []TestCase
+	if err := json.Unmarshal(cb, &ret); err != nil {
+		fmt.Println("! unmarshal cachefile failed")
+		log.Fatal(err)
+	}
+
+	return ret, nil
+}
+
+func writeCacheCase(cn, diff string, c []TestCase) error {
+	mb, err := json.Marshal(c)
+	if err != nil {
+		fmt.Println("! marshal cachefile failed")
+		log.Fatal(err)
+		return err
+	}
+
+	cfPath := cacheDir + cn + diff + ".json"
+	if err := ioutil.WriteFile(cfPath, mb, 0600); err != nil {
+		fmt.Println("! write cachefile failed")
+		log.Fatal(err)
+		return err
+	}
+	return nil
+}
+
+func getTestFromPage(cn, diff string) ([]TestCase, error) {
 	URL := "https://atcoder.jp/contests/" + cn + "/tasks/" + cn + "_" + diff
 
 	fmt.Println(URL)
@@ -54,6 +112,29 @@ func fetchTestcase(cn, diff string) ([]TestCase, error) {
 	}
 
 	return ret, nil
+}
+
+func fetchTestcase(cn, diff string) ([]TestCase, error) {
+	cacheCase, err := readCacheCase(cn, diff)
+	if err == nil {
+		fmt.Println("* read TestCase from cache")
+		return cacheCase, nil
+	}
+
+	fmt.Println("* get TestCase from Contest Page")
+	tc, err := getTestFromPage(cn, diff)
+	if err != nil {
+		fmt.Println("! get TestCase Failed")
+		log.Fatal(err)
+		return []TestCase{}, err
+	}
+
+	re := error(nil)
+	if err := writeCacheCase(cn, diff, tc); err != nil {
+		log.Fatal(err)
+		re = err
+	}
+	return tc, re
 }
 
 func uniteNewLineCode(s string) string {
