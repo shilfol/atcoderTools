@@ -189,6 +189,11 @@ func tryTests(done <-chan interface{}, cases []TestCase, filePath string) <-chan
 func DoTestcase(contestName, difficulty, filePath string) bool {
 	cases, _ := fetchTestcase(contestName, difficulty)
 
+	if len(cases) <= 0 {
+		fmt.Println("! testcase empty")
+		return false
+	}
+
 	isPassed := true
 
 	done := make(chan interface{})
