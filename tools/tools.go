@@ -2,6 +2,8 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,6 +39,27 @@ func init() {
 	if err := TryLogin(); err != nil {
 		log.Fatal(err)
 	}
+
+	u, _ := url.Parse("https://atcoder.jp")
+
+	buf := bytes.NewBuffer(nil)
+	ce := client.Jar.Cookies(u)
+	e := gob.NewEncoder(buf).Encode(&ce)
+	if e != nil {
+		log.Fatal(e)
+	}
+
+	var dc []*http.Cookie
+	dbuf := bytes.NewBuffer(buf.Bytes())
+	_ = gob.NewDecoder(dbuf).Decode(&dc)
+
+	newjar, _ := cookiejar.New(nil)
+	newjar.SetCookies(u, dc)
+	fmt.Printf("%#v", client.Jar)
+	fmt.Println()
+	fmt.Printf("%#v", newjar)
+
+	client.Jar = newjar
 }
 
 func InputUserInfo() UserInfo {
